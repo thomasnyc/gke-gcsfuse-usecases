@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gcs-fuse-2-bucket
+  namespace: ns-fusetest
+spec:
+  parallelism: 1
+  template:
+    metadata:
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/memory-request: 100Gi
+        gke-gcsfuse/memory-limit: 120Gi
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
+        cloud.google.com/gke-tpu-topology: 2x2
+      containers:
+      - name: reader
+        image: busybox
+        resources:
+          limits:
+            memory: 90Gi
+            google.com/tpu: 4
+          requests:
+            cpu: 2000m
+            memory: 10Gi
+            google.com/tpu: 4
+        command:
+          - "/bin/sh"
+          - "-c"
+          - |
+            echo "first bucket read with cache missing"
+            time cat /data/dummy_files/*  > /dev/null
+            echo "first bucket read completed"
+            echo "first bucket 2nd read with cache"
+            time cat /data/dummy_files/* > /dev/null
+            echo "first bucket read with cache 2nd read finished"
+
+            echo "2nd bucket first read with cache missing"
+            time cat /data2/dummy_files/*  > /dev/null
+            echo "2nd bucket read completed"
+            echo "2nd bucket 2nd read with cache"
+            time cat /data2/dummy_files/* > /dev/null
+            echo "2nd bucket read with cache 2nd read finished"
+        volumeMounts:
+        - name: gcs-fuse-csi-ephemeral-1
+          mountPath: /data
+          readOnly: true
+        - name: gcs-fuse-csi-ephemeral-2
+          mountPath: /data2
+          readOnly: true
+      serviceAccountName: ksa
+      volumes:
+      - name: gke-gcsfuse-cache
+        emptyDir:
+          medium: Memory
+      - name: gcs-fuse-csi-ephemeral-1
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: thomashk-gcsfuse
+            mountOptions: "implicit-dirs,file-cache:enable-parallel-downloads:true"
+            fileCacheCapacity: "50Gi"
+      - name: gcs-fuse-csi-ephemeral-2
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: thomashk-gcsfuse2
+            mountOptions: "implicit-dirs,file-cache:enable-parallel-downloads:true"
+            fileCacheCapacity: "50Gi"
+      restartPolicy: Never
+  backoffLimit: 1
